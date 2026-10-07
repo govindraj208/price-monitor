@@ -1,0 +1,7 @@
+node_modules/
+results/*.csv
+input/*.csv
+!input/.gitkeep
+.DS_Store
+*.log
+.env

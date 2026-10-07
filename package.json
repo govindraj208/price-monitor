@@ -1,0 +1,32 @@
+{
+  "name": "price-monitor",
+  "version": "2.0.0",
+  "description": "Daily OurShopee vs Amazon.ae vs Noon price comparison tool",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "headless": "node src/index.js --headless",
+    "diagnose": "node src/diagnose.js",
+    "test": "node test/match.test.js"
+  },
+  "keywords": [
+    "price-monitoring",
+    "scraping",
+    "amazon",
+    "noon",
+    "ecommerce"
+  ],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@google/genai": "^2.27.0",
+    "csv-parser": "^3.2.1",
+    "csv-writer": "^1.6.0",
+    "dotenv": "^18.0.4",
+    "playwright": "^1.63.0"
+  }
+}
