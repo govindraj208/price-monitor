@@ -6,14 +6,19 @@
 const path = require('path');
 const fs = require('fs');
 
-// ── Resolve paths to the root scraper package ─────────────────────────────────
-// Layout: price_monitor_2/
-//           src/           ← original scraper
-//           web/backend/   ← this API
-const ROOT = path.resolve(__dirname, '../../../');  // price_monitor_2/
-const SCRAPER_SRC = path.join(ROOT, 'src');
+// Resolve root scraper path flexibly
+let SCRAPER_SRC;
+if (fs.existsSync(path.resolve(__dirname, '../../../src'))) {
+  SCRAPER_SRC = path.resolve(__dirname, '../../../src');
+} else if (fs.existsSync(path.resolve(__dirname, '../../src'))) {
+  SCRAPER_SRC = path.resolve(__dirname, '../../src');
+} else if (fs.existsSync(path.resolve(process.cwd(), 'src'))) {
+  SCRAPER_SRC = path.resolve(process.cwd(), 'src');
+} else {
+  SCRAPER_SRC = path.resolve(__dirname, '../../src');
+}
 
-// Require from the parent package
+// Require from the scraper package
 function scraperRequire(mod) {
   return require(path.join(SCRAPER_SRC, mod));
 }
