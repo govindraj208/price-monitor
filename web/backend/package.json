@@ -8,7 +8,7 @@
     "dev": "nodemon src/server.js"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   },
   "dependencies": {
     "@google/genai": "^2.27.0",
