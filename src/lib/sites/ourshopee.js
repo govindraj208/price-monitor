@@ -105,6 +105,13 @@ async function searchCandidates(page, query) {
   });
 }
 
+// The SKU is the strongest handle we have, so try it before falling back to title.
+async function findBySku(page, sku) {
+  if (!sku) return [];
+  const candidates = await searchCandidates(page, sku);
+  return candidates.filter(c => c.id && c.id.toLowerCase() === String(sku).toLowerCase());
+}
+
 async function scrapeProduct(page, url) {
   if (!url) return null;
   try {
