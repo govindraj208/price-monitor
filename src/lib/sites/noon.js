@@ -83,10 +83,51 @@ async function countLoadedImages(page) {
 }
 
 async function searchCandidates(page, query, limit = 10) {
-  await goto(page, searchUrl(query), { settle: 4000 });
+  // First try Noon's fast catalog API via browser evaluate
+  try {
+    const apiResults = await page.evaluate(async ({ q, max }) => {
+      try {
+        const res = await fetch(`https://www.noon.com/_svc/catalog/api/v3/u/search?q=${encodeURIComponent(q)}&limit=${max}&locale=en-ae`, {
+          headers: { 'Accept': 'application/json' },
+        });
+        if (res.ok) {
+          const data = await res.json();
+          const hits = data.hits || [];
+          return hits.map(h => ({
+            id: h.sku || h.product_code || h.id || '',
+            title: h.name || h.title || '',
+            priceRaw: h.price ? String(h.price) : null,
+            image: h.image_key ? `https://f.nooncdn.com/p/${h.image_key}.jpg` : null,
+            href: `/${h.sku || h.product_code}/p/`,
+            rating: h.product_rating ? String(h.product_rating.avg_rating || '') : null,
+          }));
+        }
+      } catch (e) {
+        // fallback to DOM
+      }
+      return null;
+    }, { q: query, max: limit });
+
+    if (apiResults && apiResults.length > 0) {
+      return apiResults.map(c => ({
+        source: 'noon',
+        title: c.title,
+        priceRaw: c.priceRaw,
+        url: absolute(c.href),
+        id: c.id,
+        image: c.image,
+        rating: c.rating,
+      }));
+    }
+  } catch (err) {
+    // continue to DOM search
+  }
+
+  // DOM search fallback
+  await goto(page, searchUrl(query), { settle: 3000, timeout: 20000 });
   await dismissCookieBanner(page);
-  await waitForGrid(page);
-  await warmImages(page);
+  await waitForGrid(page, { maxAttempts: 4 });
+  await warmImages(page, { max: 12 });
 
   if (await isBlocked(page)) {
     const error = new Error('Noon returned a bot challenge');

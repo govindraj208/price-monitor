@@ -81,8 +81,17 @@ async function isBlocked(page) {
   return CAPTCHA_PATTERNS.some(re => re.test(text));
 }
 
-async function goto(page, url, { settle = TIMEOUTS.settle } = {}) {
-  await page.goto(url, { waitUntil: 'domcontentloaded', timeout: TIMEOUTS.navigation });
+async function goto(page, url, { settle = TIMEOUTS.settle, timeout = 25000 } = {}) {
+  try {
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout });
+  } catch (err) {
+    // If domcontentloaded timed out but the page is already rendering, continue
+    if (!/net::ERR_|DNS_/i.test(err.message)) {
+      // page is partially loaded, continue
+    } else {
+      throw err;
+    }
+  }
   await sleep(settle);
 }
 

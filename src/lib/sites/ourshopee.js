@@ -22,13 +22,10 @@ const PRICE_RE = /^\d{1,7}(?:,\d{3})*(?:\.\d{1,2})?$/;
 const RATING_RE = /^\d(?:\.\d)?\s*\|?\s*\(\d+\)$/;
 
 function searchUrl(query) {
-  return `https://ourshopee.com/uae-en/search-result/${encodeURIComponent(query)}/`;
+  return `https://ourshopee.com/uae-en/search-result/?q=${encodeURIComponent(query)}`;
 }
 
-// Product URLs are /uae-en/<slug>/<SKU>/p/. The SKU is the segment immediately
-// before /p/, but it has to be matched exactly: a case-insensitive "/p" also
-// matches the "/P" that begins "/PN3968", which captures the slug instead and
-// silently breaks the SKU lookup for every product.
+// Product URLs are /uae-en/<slug>/<SKU>/p/.
 const SKU_HREF_RE = /\/([A-Z0-9]{4,})\/p\/?(?:[?#]|$)/;
 
 function skuFromHref(href = '') {
@@ -36,56 +33,53 @@ function skuFromHref(href = '') {
   return m ? m[1] : null;
 }
 
-async function searchCandidates(page, query) {
-  await goto(page, searchUrl(query));
+async function searchCandidates(page, query, limit = 10) {
+  await goto(page, searchUrl(query), { settle: 2500, timeout: 20000 });
 
-  return page.evaluate(({ SKU_HREF_SOURCE, PRICE_RE_SOURCE, RATING_RE_SOURCE }) => {
+  return page.evaluate(({ SKU_HREF_SOURCE, max }) => {
     const skuRe = new RegExp(SKU_HREF_SOURCE);
-    const priceRe = new RegExp(PRICE_RE_SOURCE);
-    const ratingRe = new RegExp(RATING_RE_SOURCE);
     const seen = new Set();
     const out = [];
 
-    document.querySelectorAll('a[href*="/p/"]').forEach(a => {
+    const anchors = [];
+    document.querySelectorAll('a[href*="/p/"], a[href*="/p?"], [class*="product"] a').forEach(a => {
       const href = a.getAttribute('href') || '';
-      if (!href || seen.has(href)) return;
+      if (href && (href.includes('/p/') || href.includes('/p?') || skuRe.test(href)) && !anchors.includes(a)) {
+        anchors.push(a);
+      }
+    });
+
+    for (const a of anchors) {
+      if (out.length >= max) break;
+      const href = a.getAttribute('href') || '';
+      if (!href || seen.has(href)) continue;
 
       const skuMatch = href.match(skuRe);
       const sku = skuMatch ? skuMatch[1] : null;
 
-      const card = a.querySelector('[class*="product-card"]') || a;
+      const card = a.closest('[class*="product-card"], [class*="product-item"], [class*="card"], div') || a;
 
-      const titleEl = card.querySelector('h3, [class*="product-card-title"]');
+      const titleEl = card.querySelector('h2, h3, h4, [class*="title"], [class*="name"]');
       const img = card.querySelector('img');
-      const title = ((titleEl && titleEl.innerText) || (img && img.getAttribute('alt')) || '')
+      const title = ((titleEl && titleEl.innerText) || (img && img.getAttribute('alt')) || a.innerText || '')
         .replace(/\s+/g, ' ')
         .trim();
 
+      if (!title || title.length < 3) continue;
+
       let price = null;
-      let pricePx = -1;
-      for (const el of card.querySelectorAll('span,div,strong,p')) {
-        const t = (el.innerText || '').replace(/\s+/g, '').trim();
-        if (!priceRe.test(t)) continue;
+      // Extract price
+      const priceEls = card.querySelectorAll('[class*="price"], [class*="amount"], strong, span');
+      for (const el of priceEls) {
         if (el.closest('[class*="line-through"]')) continue;
-        if (el.closest('.save-banner') ||
-            el.closest('[class*="tag-rotator"]') ||
-            el.closest('[class*="tag-layer"]') ||
-            el.closest('[class*="currency-symbol"]')) continue;
-
-        const ownClass = (el.className && el.className.toString) ? el.className.toString() : '';
-        if (/\btext-xs\b/.test(ownClass)) continue;
-        if (el.querySelector('svg')) continue;
-
-        const parentText = ((el.parentElement && el.parentElement.innerText) || '')
-          .replace(/\s+/g, ' ')
-          .trim();
-        if (ratingRe.test(parentText)) continue;
-
-        const px = parseFloat(getComputedStyle(el).fontSize) || 0;
-        if (px > pricePx + 0.01) { pricePx = px; price = t; }
+        const text = el.innerText.replace(/,/g, '').trim();
+        const m = text.match(/\d+(?:\.\d{1,2})?/);
+        if (m && parseFloat(m[0]) > 0 && parseFloat(m[0]) < 100000) {
+          price = m[0];
+          break;
+        }
       }
 
-      if (!title) return;
       seen.add(href);
       out.push({
         source: 'ourshopee',
@@ -95,14 +89,10 @@ async function searchCandidates(page, query) {
         id: sku,
         image: img ? (img.getAttribute('src') || img.getAttribute('data-src') || null) : null,
       });
-    });
+    }
 
     return out;
-  }, {
-    SKU_HREF_SOURCE: SKU_HREF_RE.source,
-    PRICE_RE_SOURCE: PRICE_RE.source,
-    RATING_RE_SOURCE: RATING_RE.source,
-  });
+  }, { SKU_HREF_SOURCE: SKU_HREF_RE.source, max: limit });
 }
 
 // The SKU is the strongest handle we have, so try it before falling back to title.
