@@ -565,17 +565,22 @@ async function main() {
 
       // ---- Amazon ----
       const amz = await resolveSite({ page, hasher, site: amazon, ours: our, log, label: 'amazon' });
+      if (amz.found?.url) record['Amazon Link'] = amz.found.url;
+      if (amz.found?.id) record['Amazon ASIN'] = amz.found.id;
+
       if (amz.status === 'matched') {
         record['Amazon Price'] = amz.found.price ?? '';
-        record['Amazon Link'] = amz.found.url || '';
-        record['Amazon ASIN'] = amz.found.id || '';
+        record['Amazon Link'] = amz.found.url || record['Amazon Link'];
+        record['Amazon ASIN'] = amz.found.id || record['Amazon ASIN'];
         record['Amazon Matched Title'] = amz.found.title || '';
         record['Amazon Confidence'] = amz.confidence;
         record['Amazon Score'] = amz.score;
         notes.push(`amazon:${amz.confidence}`);
       } else if (amz.status === 'unverified') {
-        // Show what we found for a human to check, but contribute no price.
         record['Amazon Matched Title'] = `(UNVERIFIED) ${amz.found?.title || ''}`.slice(0, 200);
+        record['Amazon Link'] = amz.found?.url || record['Amazon Link'];
+        record['Amazon ASIN'] = amz.found?.id || record['Amazon ASIN'];
+        if (amz.found?.price) record['Amazon Price'] = amz.found.price;
         record['Amazon Confidence'] = 'Low';
         record['Amazon Score'] = amz.score;
         notes.push(amz.specConflict
@@ -590,16 +595,22 @@ async function main() {
 
       // ---- Noon ----
       const no = await resolveSite({ page, hasher, site: noon, ours: our, log, label: 'noon' });
+      if (no.found?.url) record['Noon Link'] = no.found.url;
+      if (no.found?.id) record['Noon Product ID'] = no.found.id;
+
       if (no.status === 'matched') {
         record['Noon Price'] = no.found.price ?? record['Noon Price'];
-        record['Noon Link'] = no.found.url || '';
-        record['Noon Product ID'] = no.found.id || '';
+        record['Noon Link'] = no.found.url || record['Noon Link'];
+        record['Noon Product ID'] = no.found.id || record['Noon Product ID'];
         record['Noon Matched Title'] = no.found.title || '';
         record['Noon Confidence'] = no.confidence;
         record['Noon Score'] = no.score;
         notes.push(`noon:${no.confidence}`);
       } else if (no.status === 'unverified') {
         record['Noon Matched Title'] = `(UNVERIFIED) ${no.found?.title || ''}`.slice(0, 200);
+        record['Noon Link'] = no.found?.url || record['Noon Link'];
+        record['Noon Product ID'] = no.found?.id || record['Noon Product ID'];
+        if (no.found?.price) record['Noon Price'] = no.found.price;
         record['Noon Confidence'] = 'Low';
         record['Noon Score'] = no.score;
         notes.push(no.specConflict

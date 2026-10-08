@@ -333,44 +333,108 @@ async function runJob({ jobId, inputPath, outputPath, options, job }) {
         record['OurShopee Link'] = our.url || '';
         await _randomDelay(_DELAY_BETWEEN_SITES);
 
-        // Amazon
-        const amz = await resolveSite({ page, hasher, site: _amazon, ours: our, label: 'amazon' });
+        // Amazon: if link provided in input CSV, scrape directly first
+        let amz = null;
+        if (row.amazonLink && /^https?:\/\//i.test(row.amazonLink)) {
+          try {
+            await page.goto(row.amazonLink, { waitUntil: 'domcontentloaded', timeout: 35000 });
+            await page.waitForTimeout(2000);
+            const priceText = await page.locator('.a-price .a-offscreen, .a-price-whole, span.a-price > span.a-offscreen').first().textContent().catch(() => null);
+            const title = await page.locator('#productTitle, h1').first().textContent().catch(() => null);
+            const priceVal = _parsePrice(priceText);
+            const asin = row.amazonLink.match(/\/dp\/([A-Z0-9]{10})/i)?.[1] || '';
+            amz = {
+              status: priceVal !== null ? 'matched' : 'unverified',
+              found: { price: priceVal, title: title?.trim() || '', url: row.amazonLink, id: asin },
+              confidence: 'High',
+              score: 0.98,
+              priceFlag: 'Direct Link',
+            };
+          } catch (err) {
+            notes.push(`amazon-direct-error:${err.message.slice(0, 30)}`);
+          }
+        }
+
+        if (!amz || amz.status !== 'matched') {
+          const searchAmz = await resolveSite({ page, hasher, site: _amazon, ours: our, label: 'amazon' });
+          if (!amz || searchAmz.status === 'matched') amz = searchAmz;
+        }
+
+        if (amz.found?.url) record['Amazon Link'] = amz.found.url;
+        if (amz.found?.id) record['Amazon ASIN'] = amz.found.id;
+        
         if (amz.status === 'matched') {
           record['Amazon Price'] = amz.found.price ?? '';
-          record['Amazon Link'] = amz.found.url || '';
-          record['Amazon ASIN'] = amz.found.id || '';
+          record['Amazon Link'] = amz.found.url || record['Amazon Link'] || row.amazonLink || '';
+          record['Amazon ASIN'] = amz.found.id || record['Amazon ASIN'] || '';
           record['Amazon Matched Title'] = amz.found.title || '';
-          record['Amazon Confidence'] = amz.confidence;
-          record['Amazon Score'] = amz.score;
-          notes.push(`amazon:${amz.confidence}`);
+          record['Amazon Confidence'] = amz.confidence || 'High';
+          record['Amazon Score'] = amz.score || 0.95;
+          notes.push(`amazon:${record['Amazon Confidence']}`);
         } else if (amz.status === 'unverified') {
           record['Amazon Matched Title'] = `(UNVERIFIED) ${amz.found?.title || ''}`.slice(0, 200);
+          record['Amazon Link'] = amz.found?.url || record['Amazon Link'] || row.amazonLink || '';
+          record['Amazon ASIN'] = amz.found?.id || record['Amazon ASIN'] || '';
+          if (amz.found?.price) record['Amazon Price'] = amz.found.price;
           record['Amazon Confidence'] = 'Low';
-          record['Amazon Score'] = amz.score;
+          record['Amazon Score'] = amz.score || 0.40;
           notes.push('amazon:unverified-check-manually');
         } else {
+          record['Amazon Link'] = record['Amazon Link'] || row.amazonLink || '';
           record['Amazon Confidence'] = 'None';
           notes.push('amazon:not-found');
         }
 
         await _randomDelay(_DELAY_BETWEEN_SITES);
 
-        // Noon
-        const no = await resolveSite({ page, hasher, site: _noon, ours: our, label: 'noon' });
+        // Noon: if link provided in input CSV, scrape directly first
+        let no = null;
+        if (row.noonLink && /^https?:\/\//i.test(row.noonLink)) {
+          try {
+            await page.goto(row.noonLink, { waitUntil: 'domcontentloaded', timeout: 35000 });
+            await page.waitForTimeout(2000);
+            const priceText = await page.locator('[data-qa="div-price-now"], .priceNow, [class*="priceNow"], [class*="sellingPrice"]').first().textContent().catch(() => null);
+            const title = await page.locator('h1, [data-qa="product-name"]').first().textContent().catch(() => null);
+            const priceVal = _parsePrice(priceText);
+            const noonId = row.noonLink.match(/\/([A-Za-z0-9]{10,})\/p\//i)?.[1] || '';
+            no = {
+              status: priceVal !== null ? 'matched' : 'unverified',
+              found: { price: priceVal, title: title?.trim() || '', url: row.noonLink, id: noonId },
+              confidence: 'High',
+              score: 0.98,
+              priceFlag: 'Direct Link',
+            };
+          } catch (err) {
+            notes.push(`noon-direct-error:${err.message.slice(0, 30)}`);
+          }
+        }
+
+        if (!no || no.status !== 'matched') {
+          const searchNo = await resolveSite({ page, hasher, site: _noon, ours: our, label: 'noon' });
+          if (!no || searchNo.status === 'matched') no = searchNo;
+        }
+
+        if (no.found?.url) record['Noon Link'] = no.found.url;
+        if (no.found?.id) record['Noon Product ID'] = no.found.id;
+
         if (no.status === 'matched') {
           record['Noon Price'] = no.found.price ?? record['Noon Price'];
-          record['Noon Link'] = no.found.url || '';
-          record['Noon Product ID'] = no.found.id || '';
+          record['Noon Link'] = no.found.url || record['Noon Link'] || row.noonLink || '';
+          record['Noon Product ID'] = no.found.id || record['Noon Product ID'] || '';
           record['Noon Matched Title'] = no.found.title || '';
-          record['Noon Confidence'] = no.confidence;
-          record['Noon Score'] = no.score;
-          notes.push(`noon:${no.confidence}`);
+          record['Noon Confidence'] = no.confidence || 'High';
+          record['Noon Score'] = no.score || 0.95;
+          notes.push(`noon:${record['Noon Confidence']}`);
         } else if (no.status === 'unverified') {
           record['Noon Matched Title'] = `(UNVERIFIED) ${no.found?.title || ''}`.slice(0, 200);
+          record['Noon Link'] = no.found?.url || record['Noon Link'] || row.noonLink || '';
+          record['Noon Product ID'] = no.found?.id || record['Noon Product ID'] || '';
+          if (no.found?.price) record['Noon Price'] = no.found.price;
           record['Noon Confidence'] = 'Low';
-          record['Noon Score'] = no.score;
+          record['Noon Score'] = no.score || 0.40;
           notes.push('noon:unverified-dump-price-shown-not-used');
         } else {
+          record['Noon Link'] = record['Noon Link'] || row.noonLink || '';
           record['Noon Confidence'] = 'None';
           notes.push('noon:not-found-dump-price-shown-not-used');
         }
