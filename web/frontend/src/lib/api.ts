@@ -12,6 +12,30 @@ export interface JobProgress {
   current: string
 }
 
+export interface ProductRecord {
+  Section?: string
+  SKU?: string
+  'Product Title'?: string
+  'OurShopee Price'?: string | number
+  'Noon Price'?: string | number
+  'Amazon Price'?: string | number
+  'Best Competitor Price'?: string | number
+  'Price Difference'?: string | number
+  'OurShopee Link'?: string
+  'Noon Link'?: string
+  'Amazon Link'?: string
+  'Amazon ASIN'?: string
+  'Noon Product ID'?: string
+  'Amazon Matched Title'?: string
+  'Noon Matched Title'?: string
+  'Amazon Confidence'?: string
+  'Noon Confidence'?: string
+  'Amazon Score'?: string | number
+  'Noon Score'?: string | number
+  'Price Flag'?: string
+  Status?: string
+}
+
 export interface Job {
   id: string
   status: JobStatus
@@ -20,6 +44,7 @@ export interface Job {
   finishedAt: string | null
   error: string | null
   logs?: string[]
+  records?: ProductRecord[]
 }
 
 export interface SearchResult {

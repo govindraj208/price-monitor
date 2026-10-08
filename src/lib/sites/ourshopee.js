@@ -105,11 +105,41 @@ async function searchCandidates(page, query) {
   });
 }
 
-// The SKU is the strongest handle we have, so try it before falling back to title.
-async function findBySku(page, sku) {
-  if (!sku) return [];
-  const candidates = await searchCandidates(page, sku);
-  return candidates.filter(c => c.id && c.id.toLowerCase() === String(sku).toLowerCase());
+async function scrapeProduct(page, url) {
+  if (!url) return null;
+  try {
+    await goto(page, url);
+    return page.evaluate(() => {
+      const titleEl = document.querySelector('h1, [class*="product-title"], [class*="productName"]');
+      const title = titleEl ? titleEl.innerText.trim() : '';
+
+      let price = null;
+      // Try specific product page price selectors
+      const priceSelectors = [
+        '[class*="special-price"]',
+        '[class*="product-price"]',
+        '[class*="final-price"]',
+        '[class*="selling-price"]',
+        'span.price',
+        'div.price',
+        'strong.price'
+      ];
+      for (const sel of priceSelectors) {
+        const el = document.querySelector(sel);
+        if (el) {
+          const m = el.innerText.replace(/,/g, '').match(/\d+(?:\.\d{1,2})?/);
+          if (m && parseFloat(m[0]) > 0) { price = m[0]; break; }
+        }
+      }
+
+      const img = document.querySelector('[class*="product-image"] img, .gallery img, img.main-image, img');
+      const image = img ? (img.getAttribute('src') || img.getAttribute('data-src')) : null;
+
+      return { title, priceRaw: price, image, url: window.location.href };
+    });
+  } catch (err) {
+    return null;
+  }
 }
 
-module.exports = { searchCandidates, findBySku, searchUrl, skuFromHref };
+module.exports = { searchCandidates, findBySku, scrapeProduct, searchUrl, skuFromHref };

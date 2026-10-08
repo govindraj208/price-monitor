@@ -123,6 +123,7 @@ app.get('/api/jobs/:id', (req, res) => {
     startedAt: job.startedAt,
     finishedAt: job.finishedAt,
     error: job.error,
+    records: job.records || [],
     // Last 50 log lines for the live log panel
     logs: job.logs.slice(-50),
   });

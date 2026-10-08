@@ -240,12 +240,17 @@ async function runJob({ jobId, inputPath, outputPath, options, job }) {
     const fmt = v => (v === null || v === undefined ? '' : v);
 
     function bestCompetitorPrice(ourPrice, noonPrice, amazonPrice) {
-      const values = [ourPrice, noonPrice, amazonPrice].filter(v => typeof v === 'number' && Number.isFinite(v));
-      return values.length ? Math.min(...values) : null;
+      // Confirmed rule: 0 or empty values are NOT valid prices and MUST be ignored
+      const competitorPrices = [noonPrice, amazonPrice].filter(v => typeof v === 'number' && Number.isFinite(v) && v > 0);
+      if (typeof ourPrice === 'number' && Number.isFinite(ourPrice) && ourPrice > 0) {
+        const all = [ourPrice, ...competitorPrices];
+        return Math.min(...all);
+      }
+      return competitorPrices.length ? Math.min(...competitorPrices) : null;
     }
 
     function priceDifference(ourPrice, best) {
-      if (typeof ourPrice !== 'number' || typeof best !== 'number') return null;
+      if (typeof ourPrice !== 'number' || typeof best !== 'number' || ourPrice <= 0 || best <= 0) return null;
       return Math.round((ourPrice - best) * 100) / 100;
     }
 
@@ -256,17 +261,17 @@ async function runJob({ jobId, inputPath, outputPath, options, job }) {
       addLog(job.progress.current);
 
       const record = {
-        Section: row.section,
-        SKU: row.sku,
-        'Product Title': row.title,
-        'OurShopee Price': row.ourPriceRaw,
-        'Noon Price': row.noonPriceRaw,
+        Section: row.section || '',
+        SKU: row.sku || '',
+        'Product Title': row.title || '',
+        'OurShopee Price': row.ourPriceRaw || '',
+        'Noon Price': row.noonPriceRaw || '',
         'Amazon Price': '',
         'Best Competitor Price': '',
         'Price Difference': '',
-        'OurShopee Link': row.ourLink,
-        'Noon Link': row.noonLink,
-        'Amazon Link': row.amazonLink,
+        'OurShopee Link': row.ourLink || '',
+        'Noon Link': row.noonLink || '',
+        'Amazon Link': row.amazonLink || '',
         'Amazon ASIN': '',
         'Noon Product ID': '',
         'Amazon Matched Title': '',
@@ -292,45 +297,66 @@ async function runJob({ jobId, inputPath, outputPath, options, job }) {
           barcode: row.barcode || null,
         };
 
-        let osCandidates = [];
-        try {
-          osCandidates = await _ourshopee.findBySku(page, row.sku);
-          if (!osCandidates.length) {
-            osCandidates = await _ourshopee.searchCandidates(page, row.title, 6);
-          }
-        } catch (error) {
-          if (isFatalPageError(error)) throw error;
-          notes.push(`ourshopee:${error.message.slice(0, 40)}`);
-        }
-
-        if (osCandidates.length) {
-          for (const c of osCandidates) c.price = _parsePrice(c.priceRaw);
-          const skuMatch = osCandidates.find(c => c.id && row.sku && c.id.toLowerCase() === String(row.sku).toLowerCase());
-          const chosen = skuMatch || _pickBest({ title: row.title, price: our.price }, osCandidates).best?.candidate;
-
-          if (chosen) {
-            const foreignSku = Boolean(row.sku) && chosen.id &&
-              String(chosen.id).toLowerCase() !== String(row.sku).trim().toLowerCase();
-
-            if (foreignSku) {
-              notes.push(`ourshopee found ${chosen.id} not ${row.sku}-kept dump values`);
-            } else {
-              our.url = chosen.url;
-              our.id = chosen.id || our.id;
-              if (chosen.title) our.title = chosen.title;
-              const livePrice = chosen.price;
-              if (livePrice !== null) {
+        // If direct OurShopee link provided, scrape it directly
+        if (row.ourLink && /^https?:\/\//i.test(row.ourLink)) {
+          try {
+            const osDirect = await _ourshopee.scrapeProduct(page, row.ourLink);
+            if (osDirect && osDirect.priceRaw) {
+              const livePrice = _parsePrice(osDirect.priceRaw);
+              if (livePrice && livePrice > 0) {
                 our.price = livePrice;
                 record['OurShopee Price'] = livePrice;
               }
-              our.imageHash = await hasher.hash(chosen.image);
+              if (osDirect.title) our.title = osDirect.title;
+              if (osDirect.image) our.imageHash = await hasher.hash(osDirect.image);
             }
+          } catch (e) {
+            notes.push(`ourshopee-direct:${e.message.slice(0, 30)}`);
           }
-        } else {
-          notes.push('ourshopee not found');
         }
 
-        record['OurShopee Link'] = our.url || '';
+        let osCandidates = [];
+        if (!our.price || !our.url) {
+          try {
+            osCandidates = await _ourshopee.findBySku(page, row.sku);
+            if (!osCandidates.length) {
+              // Try title search
+              osCandidates = await _ourshopee.searchCandidates(page, row.title, 6);
+            }
+          } catch (error) {
+            if (isFatalPageError(error)) throw error;
+            notes.push(`ourshopee:${error.message.slice(0, 40)}`);
+          }
+
+          if (osCandidates.length) {
+            for (const c of osCandidates) c.price = _parsePrice(c.priceRaw);
+            const skuMatch = osCandidates.find(c => c.id && row.sku && c.id.toLowerCase() === String(row.sku).toLowerCase());
+            const chosen = skuMatch || _pickBest({ title: row.title, price: our.price }, osCandidates).best?.candidate;
+
+            if (chosen) {
+              const foreignSku = Boolean(row.sku) && chosen.id &&
+                String(chosen.id).toLowerCase() !== String(row.sku).trim().toLowerCase();
+
+              if (foreignSku) {
+                notes.push(`ourshopee found ${chosen.id} not ${row.sku}-kept dump values`);
+              } else {
+                our.url = chosen.url || our.url;
+                our.id = chosen.id || our.id;
+                if (chosen.title) our.title = chosen.title;
+                const livePrice = chosen.price;
+                if (livePrice !== null && livePrice > 0) {
+                  our.price = livePrice;
+                  record['OurShopee Price'] = livePrice;
+                }
+                our.imageHash = await hasher.hash(chosen.image);
+              }
+            }
+          } else if (!our.url) {
+            notes.push('ourshopee not found');
+          }
+        }
+
+        record['OurShopee Link'] = our.url || row.ourLink || '';
         await _randomDelay(_DELAY_BETWEEN_SITES);
 
         // Amazon: if link provided in input CSV, scrape directly first
@@ -344,7 +370,7 @@ async function runJob({ jobId, inputPath, outputPath, options, job }) {
             const priceVal = _parsePrice(priceText);
             const asin = row.amazonLink.match(/\/dp\/([A-Z0-9]{10})/i)?.[1] || '';
             amz = {
-              status: priceVal !== null ? 'matched' : 'unverified',
+              status: priceVal !== null && priceVal > 0 ? 'matched' : 'unverified',
               found: { price: priceVal, title: title?.trim() || '', url: row.amazonLink, id: asin },
               confidence: 'High',
               score: 0.98,
@@ -375,7 +401,7 @@ async function runJob({ jobId, inputPath, outputPath, options, job }) {
           record['Amazon Matched Title'] = `(UNVERIFIED) ${amz.found?.title || ''}`.slice(0, 200);
           record['Amazon Link'] = amz.found?.url || record['Amazon Link'] || row.amazonLink || '';
           record['Amazon ASIN'] = amz.found?.id || record['Amazon ASIN'] || '';
-          if (amz.found?.price) record['Amazon Price'] = amz.found.price;
+          if (amz.found?.price && amz.found.price > 0) record['Amazon Price'] = amz.found.price;
           record['Amazon Confidence'] = 'Low';
           record['Amazon Score'] = amz.score || 0.40;
           notes.push('amazon:unverified-check-manually');
@@ -398,7 +424,7 @@ async function runJob({ jobId, inputPath, outputPath, options, job }) {
             const priceVal = _parsePrice(priceText);
             const noonId = row.noonLink.match(/\/([A-Za-z0-9]{10,})\/p\//i)?.[1] || '';
             no = {
-              status: priceVal !== null ? 'matched' : 'unverified',
+              status: priceVal !== null && priceVal > 0 ? 'matched' : 'unverified',
               found: { price: priceVal, title: title?.trim() || '', url: row.noonLink, id: noonId },
               confidence: 'High',
               score: 0.98,
@@ -429,7 +455,7 @@ async function runJob({ jobId, inputPath, outputPath, options, job }) {
           record['Noon Matched Title'] = `(UNVERIFIED) ${no.found?.title || ''}`.slice(0, 200);
           record['Noon Link'] = no.found?.url || record['Noon Link'] || row.noonLink || '';
           record['Noon Product ID'] = no.found?.id || record['Noon Product ID'] || '';
-          if (no.found?.price) record['Noon Price'] = no.found.price;
+          if (no.found?.price && no.found.price > 0) record['Noon Price'] = no.found.price;
           record['Noon Confidence'] = 'Low';
           record['Noon Score'] = no.score || 0.40;
           notes.push('noon:unverified-dump-price-shown-not-used');
@@ -439,26 +465,26 @@ async function runJob({ jobId, inputPath, outputPath, options, job }) {
           notes.push('noon:not-found-dump-price-shown-not-used');
         }
 
-        // Derived columns
+        // Derived columns (Strictly ignoring 0 or invalid numbers)
         const ourPrice = _parsePrice(record['OurShopee Price']);
         const noonPrice = _parsePrice(record['Noon Price']);
         const amazonPrice = _parsePrice(record['Amazon Price']);
-        const verifiedNoon = no.status === 'matched' ? noonPrice : null;
-        const verifiedAmazon = amz.status === 'matched' ? amazonPrice : null;
+        const verifiedNoon = (no.status === 'matched' && noonPrice > 0) ? noonPrice : null;
+        const verifiedAmazon = (amz.status === 'matched' && amazonPrice > 0) ? amazonPrice : null;
         const best = bestCompetitorPrice(ourPrice, verifiedNoon, verifiedAmazon);
 
-        record['Best Competitor Price'] = best === null ? '' : best;
+        record['Best Competitor Price'] = (best === null || best <= 0) ? '' : best;
         const diff = priceDifference(ourPrice, best);
         record['Price Difference'] = diff === null ? '' : diff.toFixed(2);
 
         const flagParts = [];
-        if (amz.status === 'matched') flagParts.push(`amazon:${amz.priceFlag}`);
-        if (no.status === 'matched') flagParts.push(`noon:${no.priceFlag}`);
+        if (amz.status === 'matched' && amz.priceFlag) flagParts.push(`amazon:${amz.priceFlag}`);
+        if (no.status === 'matched' && no.priceFlag) flagParts.push(`noon:${no.priceFlag}`);
         record['Price Flag'] = flagParts.join('; ');
 
         record.Status = notes.join('; ');
 
-        addLog(`  ours=${fmt(ourPrice)} amz=${fmt(verifiedAmazon)}(${record['Amazon Confidence']}) noon=${fmt(verifiedNoon)}(${record['Noon Confidence']}) → best=${fmt(best)}`);
+        addLog(`  ours=${fmt(ourPrice)} amz=${fmt(verifiedAmazon)}(${record['Amazon Confidence']}) noon=${fmt(verifiedNoon)}(${record['Noon Confidence']}) → best=${fmt(best)} diff=${record['Price Difference'] || '0'}`);
       } catch (error) {
         fatal = isFatalPageError(error);
         record.Status = `${fatal ? 'BROWSER CLOSED' : 'ERROR'}: ${error.message}`.slice(0, 120);
@@ -466,6 +492,7 @@ async function runJob({ jobId, inputPath, outputPath, options, job }) {
       }
 
       records.push(record);
+      job.records = records;
 
       // Incremental write
       await _writeResult(outputPath, records, { exactOnly: options.exact || false });
@@ -481,6 +508,7 @@ async function runJob({ jobId, inputPath, outputPath, options, job }) {
     job.progress.processed = records.length;
     job.progress.current = 'Done';
     job.status = 'done';
+    job.records = records;
     job.finishedAt = new Date().toISOString();
     addLog(`Finished. ${records.length} rows written.`);
   } catch (err) {
@@ -491,17 +519,15 @@ async function runJob({ jobId, inputPath, outputPath, options, job }) {
     throw err;
   } finally {
     if (browser) await browser.close().catch(() => {});
-    // Clean up uploaded input file
     fs.unlink(inputPath, () => {});
   }
 }
 
-// ── Quick search (diagnose-mode) ──────────────────────────────────────────────
+// ── Quick search (across Amazon.ae, Noon.com, and OurShopee.com) ─────────────
 async function runSearch({ query, site = 'all', limit = 5 }) {
   loadScraperModules();
 
   const { browser, context, page } = await _launch({ headless: true });
-  const hasher = new _ImageHasher(context, page);
   const results = {};
 
   const siteMap = {
@@ -512,14 +538,24 @@ async function runSearch({ query, site = 'all', limit = 5 }) {
 
   const sitesToSearch = site === 'all' ? Object.keys(siteMap) : [site];
 
+  // Helper for cleaner search fallback query if original query has too many words
+  const cleanQ = query.trim();
+  const shortQ = cleanQ.split(' ').slice(0, 4).join(' ');
+
   try {
     for (const siteName of sitesToSearch) {
       const siteObj = siteMap[siteName];
       if (!siteObj) continue;
       try {
-        const candidates = await siteObj.searchCandidates(page, query, limit);
-        for (const c of candidates) c.price = _parsePrice(c.priceRaw);
-        results[siteName] = candidates.slice(0, limit);
+        let candidates = await siteObj.searchCandidates(page, cleanQ, limit);
+        if ((!candidates || !candidates.length) && shortQ && shortQ !== cleanQ) {
+          candidates = await siteObj.searchCandidates(page, shortQ, limit);
+        }
+        for (const c of (candidates || [])) {
+          c.price = _parsePrice(c.priceRaw);
+          if (c.price === 0) c.price = null;
+        }
+        results[siteName] = (candidates || []).slice(0, limit);
       } catch (err) {
         results[siteName] = { error: err.message };
       }

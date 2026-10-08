@@ -365,14 +365,17 @@ async function resolveSite({ page, hasher, site, ours, log, label }) {
 }
 
 function bestCompetitorPrice(ourPrice, noonPrice, amazonPrice) {
-  // Confirmed from the user's sheet: the minimum across our own price and both
-  // competitors, so it equals our price when we are already the cheapest.
-  const values = [ourPrice, noonPrice, amazonPrice].filter(v => typeof v === 'number' && Number.isFinite(v));
-  return values.length ? Math.min(...values) : null;
+  // 0 or empty values are NOT valid prices and MUST be ignored
+  const competitorPrices = [noonPrice, amazonPrice].filter(v => typeof v === 'number' && Number.isFinite(v) && v > 0);
+  if (typeof ourPrice === 'number' && Number.isFinite(ourPrice) && ourPrice > 0) {
+    const all = [ourPrice, ...competitorPrices];
+    return Math.min(...all);
+  }
+  return competitorPrices.length ? Math.min(...competitorPrices) : null;
 }
 
 function priceDifference(ourPrice, best) {
-  if (typeof ourPrice !== 'number' || typeof best !== 'number') return null;
+  if (typeof ourPrice !== 'number' || typeof best !== 'number' || ourPrice <= 0 || best <= 0) return null;
   return Math.round((ourPrice - best) * 100) / 100;
 }
 
