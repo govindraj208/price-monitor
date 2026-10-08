@@ -1,5 +1,5 @@
-# Official Playwright container with all browser dependencies pre-installed
-FROM mcr.microsoft.com/playwright:v1.49.0-noble
+# Base image with Node and Playwright system dependencies
+FROM mcr.microsoft.com/playwright:v1.53.0-noble
 
 WORKDIR /app
 
@@ -7,9 +7,10 @@ WORKDIR /app
 COPY package*.json ./
 COPY web/backend/package*.json ./web/backend/
 
-# Install dependencies
+# Install dependencies and exact chromium binary
 RUN npm install
 RUN cd web/backend && npm install
+RUN npx playwright install chromium
 
 # Copy source code
 COPY . .
